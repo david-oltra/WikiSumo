@@ -1,0 +1,16 @@
+#define LED_I   GPIO_NUM_2 //GPIO_NUM_19
+#define LED_F   GPIO_NUM_18
+#define LED_D   GPIO_NUM_15
+#define LED_T   GPIO_NUM_17
+#define LINEA_I GPIO_NUM_36
+#define LINEA_D GPIO_NUM_39
+#define MOTOR_A_1   GPIO_NUM_32
+#define MOTOR_A_2   GPIO_NUM_33
+#define MOTOR_B_1   GPIO_NUM_25
+#define MOTOR_B_2   GPIO_NUM_26
+#define MOTOR_A_PWM GPIO_NUM_27
+#define MOTOR_B_PWM GPIO_NUM_14
+#define BTN     GPIO_NUM_12
+#define SCL     GPIO_NUM_22
+#define SDA     GPIO_NUM_21
+#define MODE_ANALOG GPIO_NUM_34
