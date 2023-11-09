@@ -2,7 +2,19 @@
 #define __START_MODE__
 
 #include <stdint.h>
+#include <driver/gpio.h>
 
-int8_t start_mode();
+class START_MODE
+{
+    public:
 
-#endif 
+        START_MODE(gpio_num_t _PIN_ANALOG);
+
+        void Init();
+        int8_t read();
+
+    private:
+        gpio_num_t PIN_ANALOG;
+};
+
+#endif

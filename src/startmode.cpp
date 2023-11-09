@@ -1,34 +1,42 @@
 #include <startmode.h>
 #include "driver/adc.h"
 
-int8_t start_mode()
+START_MODE::START_MODE(gpio_num_t _PIN_ANALOG)
+{
+    PIN_ANALOG = _PIN_ANALOG;
+}
+
+void START_MODE::Init()
 {
     adc1_config_width(ADC_WIDTH_BIT_12);
     adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_11);
-    
-    // Get configuration
+}
+
+int8_t START_MODE::read()
+{
     int8_t num_muestras = 10;
-    uint32_t adc_raw=0;
+    uint32_t muestras=0;
+    
     for(uint8_t i =0; i < num_muestras; i++){
-        adc_raw += adc1_get_raw(ADC1_CHANNEL_6);
+        muestras += adc1_get_raw(ADC1_CHANNEL_6);
     }
-    adc_raw /= num_muestras;
+    muestras /= num_muestras;
 
     int8_t mode = -1;
 
-    if(adc_raw < 200) // IZQ
+    if(muestras < 200) // LEFT
     {
         mode = 0;
     }
-    else if(adc_raw < 1506) // FRONT
+    else if(muestras < 1506) // FRONT
     {
         mode = 1;
     }
-    else if ( adc_raw < 2065) // DRCH
+    else if ( muestras < 2065) // RIGHT
     {
         mode = 2;
     }
-    else if ( adc_raw < 2441) // TRAS
+    else if ( muestras < 2441) // BACK
     {
         mode = 3;
     }
