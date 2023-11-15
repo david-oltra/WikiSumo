@@ -9,10 +9,6 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
-#define NUM_TOF_SENSORS 3
-#define NUM_LINE_SENSORS 2
-
-
 class labVL53L0X
 {
 public:
@@ -23,9 +19,9 @@ public:
         vSemaphoreCreateBinary(xSemaphore);
     }
 
-    bool Init(VL53L0X_DeviceModes devMode, uint8_t VL53L0X_I2C_ADDRESS);
+    bool Init(VL53L0X_DeviceModes devMode);
 
-    bool setThresholds(uint32_t rate, uint32_t threshold);
+    void setThresholds();
     
     bool setSPads(uint32_t padCount, uint32_t isAperture);
 
@@ -39,8 +35,7 @@ public:
 
     bool setTimingBudget(uint32_t TimingBudgetMicroSeconds);
 
-private : 
-    i2c_port_t i2c_port;
+        private : i2c_port_t i2c_port;
     gpio_num_t gpio_xshut;
     gpio_num_t gpio_gpio1;
     VL53L0X_Dev_t vl53l0x_dev;
@@ -50,15 +45,6 @@ private :
     VL53L0X_Error init_vl53l0x(VL53L0X_DeviceModes devMode);
     VL53L0X_Error print_pal_error(VL53L0X_Error status,
                                          const char *method);
-
-    uint32_t tofRateValue[NUM_TOF_SENSORS] = {70,70,80};
-    uint32_t tofThresholdValue[NUM_TOF_SENSORS] = {95,95,98};
-
-    uint32_t lastTofValues[NUM_TOF_SENSORS] = {0,0,0};
-
-    /* Critical sections */
-    uint16_t tofData[NUM_TOF_SENSORS];
-    uint32_t lineData[NUM_LINE_SENSORS];
 };
 
 #endif //__LABVL56L0X_H__
