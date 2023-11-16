@@ -8,6 +8,9 @@
 #include <led.h>
 #include <TB6612.h>
 #include <QRE1113.h>
+#include <VL53L0X.h>
+
+#define I2C_PORT I2C_NUM_0
 
 static char TAG[] = "MAIN";
 
@@ -18,6 +21,9 @@ LED led_left(PIN_LED_L), led_front(PIN_LED_F), led_right(PIN_LED_R), led_back(PI
 TB6612 motores(PIN_MOTOR_A_1, PIN_MOTOR_A_2, PIN_MOTOR_A_PWM, PIN_MOTOR_B_1, PIN_MOTOR_B_2, PIN_MOTOR_B_PWM);
 QRE1113 sensor_linea_i(PIN_QRE1113_L);
 QRE1113 sensor_linea_d(PIN_QRE1113_R);
+VL53L0X sensor_distancia_i(I2C_PORT, PIN_VL53L0X_L);
+VL53L0X sensor_distancia_c(I2C_PORT, PIN_VL53L0X_C);
+VL53L0X sensor_distancia_d(I2C_PORT, PIN_VL53L0X_R);
 
 //dVL53L0X sensor_distancia(I2C_NUM_0, PIN_SDA, PIN_SCL, PIN_VL53L0X_C, 0X32);
 
@@ -26,9 +32,6 @@ int16_t tiempo_de_giro = 500;
 
 static TaskHandle_t core_A = NULL;
 static TaskHandle_t core_B = NULL;
-
-uint8_t VL53L0X_I2C_ADDRESS[3] = {0x30, 0x31, 0x32};
-gpio_num_t VL53L0X_XSHUT[3] = {PIN_VL53L0X_L, PIN_VL53L0X_C, PIN_VL53L0X_R};
 
 void Init()
 {
@@ -49,7 +52,84 @@ void Init()
     sensor_linea_i.Init(); 
     sensor_linea_d.Init();
     ESP_LOGI(TAG,"START_MODE");
-    //ESP_LOGI(TAG,"VL53L0X");
+    ESP_LOGI(TAG,"VL53L0X");
+
+}
+
+
+uint8_t VL53L0X_I2C_ADDRESS[3] = {0x30, 0x31, 0x32};
+gpio_num_t VL53L0X_XSHUT[3] = {PIN_VL53L0X_L, PIN_VL53L0X_C, PIN_VL53L0X_R};
+
+void Init_VL53L0X()
+{
+    for (uint8_t i=0; i<3; i++)
+    {
+        gpio_config_t io_conf = {};
+        io_conf.intr_type = GPIO_INTR_DISABLE;
+        io_conf.mode = GPIO_MODE_OUTPUT;
+        io_conf.pin_bit_mask = (1ULL << VL53L0X_XSHUT[i]);
+        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+        gpio_config(&io_conf);
+        gpio_set_level(VL53L0X_XSHUT[i],0);
+    }
+    vTaskDelay(pdMS_TO_TICKS(250));
+    for (uint8_t i=0; i<3; i++)
+    {
+        gpio_set_level(VL53L0X_XSHUT[i],0);
+    }
+    sensor_distancia_i.i2cMasterInit(PIN_SDA,PIN_SCL);
+    if (!sensor_distancia_i.init()) {
+        ESP_LOGE(TAG, "Failed to initialize VL53L0X :(");
+        while(1)
+        {
+            led_left.Update(LED::BLINK_250ms);
+            led_front.Update(LED::OFF);
+            led_right.Update(LED::OFF);
+            led_back.Update(LED::OFF);
+        }
+    }
+    sensor_distancia_i.setDeviceAddress(0x31);
+    sensor_distancia_c.reset();
+    sensor_distancia_d.reset();
+    if (!sensor_distancia_c.init()) {
+        ESP_LOGE(TAG, "Failed to initialize VL53L0X :(");
+        while(1)
+        {
+            led_left.Update(LED::OFF);
+            led_front.Update(LED::BLINK_250ms);
+            led_right.Update(LED::OFF);
+            led_back.Update(LED::OFF);
+        }
+    }
+    sensor_distancia_c.setDeviceAddress(0x30);
+    sensor_distancia_d.reset();
+    if (!sensor_distancia_d.init()) {
+        ESP_LOGE(TAG, "Failed to initialize VL53L0X :(");
+        while(1)
+        {
+            led_left.Update(LED::OFF);
+            led_front.Update(LED::OFF);
+            led_right.Update(LED::BLINK_250ms);
+            led_back.Update(LED::OFF);
+        }
+    }
+}
+
+
+extern "C" void CheckSensorTOF(VL53L0X sensor, uint i)
+{
+    uint16_t result_mm = 0;
+    TickType_t tick_start = xTaskGetTickCount();
+    bool res = sensor.read(&result_mm);
+    TickType_t tick_end = xTaskGetTickCount();
+    int took_ms = ((int)tick_end - tick_start) / portTICK_PERIOD_MS;
+    if (res)
+    {
+        ESP_LOGI(TAG, "Sensor %u Range: %d [mm] took %d [ms]", i, (int)result_mm, took_ms);
+    }            
+    else
+    ESP_LOGE(TAG, "Failed to measure :(");
 }
 
 
@@ -78,9 +158,11 @@ void coreAThread(void *arg)
 
     while(rotary.Key())
     { 
-        ESP_LOGI(TAG,"CORE_A start: %u",rotary.Key());
+//        ESP_LOGI(TAG,"CORE_A start: %u",rotary.Key());
+        uint8_t status_rotary = rotary.CheckEncoder();
+//        printf("case: %u \n", status_rotary);
 
-        switch (rotary.CheckEncoder())
+        switch (status_rotary)
         {
         case 0:
             led_left.Update(LED::ON);
@@ -157,24 +239,71 @@ void coreAThread(void *arg)
 void coreBThread(void *arg)
 {
     ESP_LOGE(TAG, "Iniciando CORE B");
-    while (true)
+    
+    while(true)
     {
-        vTaskDelay(pdMS_TO_TICKS(2000));
-        ESP_LOGI(TAG, "Core B");
+        //vTaskDelay(pdMS_TO_TICKS(2000));
+        //ESP_LOGI(TAG, "Core B");
 
-
+        CheckSensorTOF(sensor_distancia_i,0);
+        CheckSensorTOF(sensor_distancia_c,1);
+        CheckSensorTOF(sensor_distancia_d,2);
     }
+
+
+
 }
 
 
-void app_main() 
+void i2c_scanner()
+{
+  //    CheckSensorTOF(sensor_distancia_i);
+        int i;
+        esp_err_t espRc;
+        printf("     0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f\n");
+        printf("00:         ");
+        for (i=3; i< 0x78; i++) {
+            i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+            i2c_master_start(cmd);
+            i2c_master_write_byte(cmd, (i << 1) | I2C_MASTER_WRITE, 1 /* expect ack */);
+            i2c_master_stop(cmd);
+
+            espRc = i2c_master_cmd_begin(I2C_NUM_0, cmd, 10/portTICK_PERIOD_MS);
+            if (i%16 == 0) {
+                printf("\n%.2x:", i);
+            }
+            if (espRc == 0) {
+                printf(" %.2x", i);
+            } else {
+                printf(" --");
+            }
+            //ESP_LOGD(tag, "i=%d, rc=%d (0x%x)", i, espRc, espRc);
+            i2c_cmd_link_delete(cmd);
+	}
+	printf("\n");
+	vTaskDelete(NULL);
+}
+
+
+void app_main()
 {   
     ESP_LOGE(TAG, "Iniciando software");
     Init();
+    Init_VL53L0X();
+
+    while(0)
+    {
+    //    CheckSensorTOF(sensor_distancia_i,0);
+    //    CheckSensorTOF(sensor_distancia_c,1);
+    //    CheckSensorTOF(sensor_distancia_d,2);
+
+        i2c_scanner();
+    }
+
 
 
     xTaskCreatePinnedToCore(coreBThread, "core_B", 4096, NULL, 9, &core_B, 1);    
     xTaskCreatePinnedToCore(coreAThread, "core_A", 4096, NULL, 10, &core_A, 0);
+    
 }
-
 
