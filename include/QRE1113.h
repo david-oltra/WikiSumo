@@ -10,6 +10,8 @@ class QRE1113
 
         void Init();
 
+        gpio_num_t PinNum();
+
     private:
         gpio_num_t PIN_SENSOR;
 

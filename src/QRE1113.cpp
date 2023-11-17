@@ -16,3 +16,9 @@ void QRE1113::Init()
     io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
     gpio_config(&io_conf);
 }
+
+
+gpio_num_t QRE1113::PinNum()
+{
+    return PIN_SENSOR;
+}

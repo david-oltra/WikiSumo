@@ -25,8 +25,6 @@ VL53L0X sensor_distancia_i(I2C_PORT, PIN_VL53L0X_L);
 VL53L0X sensor_distancia_c(I2C_PORT, PIN_VL53L0X_C);
 VL53L0X sensor_distancia_d(I2C_PORT, PIN_VL53L0X_R);
 
-//dVL53L0X sensor_distancia(I2C_NUM_0, PIN_SDA, PIN_SCL, PIN_VL53L0X_C, 0X32);
-
 int64_t tiempo_espera_inicio = 5000;
 int16_t tiempo_de_giro = 500;
 
@@ -56,6 +54,14 @@ void Init()
 
 }
 
+void Leds_update(LED::STATUS lft, LED::STATUS frnt, LED::STATUS rght, LED::STATUS bck)
+{
+    led_left.Update(lft);
+    led_front.Update(frnt);
+    led_right.Update(rght);
+    led_back.Update(bck);
+}
+
 
 uint8_t VL53L0X_I2C_ADDRESS[3] = {0x30, 0x31, 0x32};
 gpio_num_t VL53L0X_XSHUT[3] = {PIN_VL53L0X_L, PIN_VL53L0X_C, PIN_VL53L0X_R};
@@ -83,10 +89,7 @@ void Init_VL53L0X()
         ESP_LOGE(TAG, "Failed to initialize VL53L0X :(");
         while(1)
         {
-            led_left.Update(LED::BLINK_250ms);
-            led_front.Update(LED::OFF);
-            led_right.Update(LED::OFF);
-            led_back.Update(LED::OFF);
+            Leds_update(LED::BLINK_250ms, LED::OFF, LED::OFF, LED::OFF);
         }
     }
     sensor_distancia_i.setDeviceAddress(0x31);
@@ -96,10 +99,7 @@ void Init_VL53L0X()
         ESP_LOGE(TAG, "Failed to initialize VL53L0X :(");
         while(1)
         {
-            led_left.Update(LED::OFF);
-            led_front.Update(LED::BLINK_250ms);
-            led_right.Update(LED::OFF);
-            led_back.Update(LED::OFF);
+            Leds_update(LED::OFF, LED::BLINK_250ms, LED::OFF, LED::OFF);
         }
     }
     sensor_distancia_c.setDeviceAddress(0x30);
@@ -108,16 +108,14 @@ void Init_VL53L0X()
         ESP_LOGE(TAG, "Failed to initialize VL53L0X :(");
         while(1)
         {
-            led_left.Update(LED::OFF);
-            led_front.Update(LED::OFF);
-            led_right.Update(LED::BLINK_250ms);
-            led_back.Update(LED::OFF);
+            Leds_update(LED::OFF, LED::OFF, LED::BLINK_250ms, LED::OFF);
         }
     }
 }
 
 
-extern "C" void CheckSensorTOF(VL53L0X sensor, uint i)
+uint16_t range_detect = 500; 
+extern "C" bool CheckSensorTOF(VL53L0X sensor, uint i)
 {
     uint16_t result_mm = 0;
     TickType_t tick_start = xTaskGetTickCount();
@@ -130,27 +128,23 @@ extern "C" void CheckSensorTOF(VL53L0X sensor, uint i)
     }            
     else
     ESP_LOGE(TAG, "Failed to measure :(");
+
+    if ((int)result_mm < range_detect)
+    {
+        return 1;
+    }
+    else {
+        return 0;
+    }
 }
 
 
-void CheckSensorLinea()
+bool CheckSensorLinea(QRE1113 sensor_linea)
 {
-    int8_t sensor_l = gpio_get_level(PIN_QRE1113_L);
-    int8_t sensor_r = gpio_get_level(PIN_QRE1113_R);
-    
-    if (sensor_l == 1)
-    {
-        motores.Update(TB6612::RIGHT);
-        vTaskDelay(pdMS_TO_TICKS(tiempo_de_giro));
-    }
-    else if (sensor_r == 1)
-    {
-        motores.Update(TB6612::LEFT);
-        vTaskDelay(pdMS_TO_TICKS(tiempo_de_giro));
-    }
-    
+    return gpio_get_level(sensor_linea.PinNum());
 }
 
+int8_t start = 0;
 int8_t selected_start_mode;
 void coreAThread(void *arg)
 {
@@ -165,31 +159,23 @@ void coreAThread(void *arg)
         switch (status_rotary)
         {
         case 0:
-            led_left.Update(LED::ON);
-            led_front.Update(LED::OFF);
-            led_right.Update(LED::OFF);
-            led_back.Update(LED::OFF);
+            Leds_update(LED::ON, LED::OFF, LED::OFF, LED::OFF);
+        //    led_left.Update(LED::ON);
+        //    led_front.Update(LED::OFF);
+        //    led_right.Update(LED::OFF);
+        //    led_back.Update(LED::OFF);
             selected_start_mode = 0;
         break;
         case 1:
-            led_left.Update(LED::OFF);
-            led_front.Update(LED::ON);
-            led_right.Update(LED::OFF);
-            led_back.Update(LED::OFF);
+            Leds_update(LED::OFF, LED::ON, LED::OFF, LED::OFF);
             selected_start_mode = 1;
         break;
         case 2:
-            led_left.Update(LED::OFF);
-            led_front.Update(LED::OFF);
-            led_right.Update(LED::ON);
-            led_back.Update(LED::OFF);
+            Leds_update(LED::OFF, LED::OFF, LED::ON, LED::OFF);
             selected_start_mode = 2;
         break;
         case 3:
-            led_left.Update(LED::OFF);
-            led_front.Update(LED::OFF);
-            led_right.Update(LED::OFF);
-            led_back.Update(LED::ON);
+            Leds_update(LED::OFF, LED::OFF, LED::OFF, LED::ON);
             selected_start_mode = 3;
         break;
         default:
@@ -206,6 +192,7 @@ void coreAThread(void *arg)
     }
 
     vTaskDelay(pdMS_TO_TICKS(tiempo_espera_inicio));    //5seg
+    start = 1;
 
     switch(selected_start_mode)
     {  
@@ -232,25 +219,43 @@ void coreAThread(void *arg)
     {
         ESP_LOGI(TAG,"CORE_A: SEARCHING");
         motores.Update(TB6612::FWD); 
-        CheckSensorLinea();
+        if (CheckSensorLinea(sensor_linea_i))
+        {
+            motores.Update(TB6612::RIGHT);
+            vTaskDelay(pdMS_TO_TICKS(tiempo_de_giro));
+        }
+        else if (CheckSensorLinea(sensor_linea_d))
+        {
+            motores.Update(TB6612::LEFT);
+            vTaskDelay(pdMS_TO_TICKS(tiempo_de_giro));
+        }
     }
 }
 
 void coreBThread(void *arg)
 {
-    ESP_LOGE(TAG, "Iniciando CORE B");
-    
-    while(true)
+    ESP_LOGE(TAG, "Iniciando CORE B");    
+    while(1)
     {
-        //vTaskDelay(pdMS_TO_TICKS(2000));
-        //ESP_LOGI(TAG, "Core B");
-
-        CheckSensorTOF(sensor_distancia_i,0);
-        CheckSensorTOF(sensor_distancia_c,1);
-        CheckSensorTOF(sensor_distancia_d,2);
+        while(start)
+        {
+            if (CheckSensorTOF(sensor_distancia_c,1))
+            {
+                motores.Update(TB6612::FWD);
+                Leds_update(LED::OFF, LED::ON, LED::OFF, LED::OFF);
+            }
+            else if (CheckSensorTOF(sensor_distancia_i,0))
+            {
+                motores.Update(TB6612::LEFT);
+                Leds_update(LED::ON, LED::OFF, LED::OFF, LED::OFF);
+            }
+            else if (CheckSensorTOF(sensor_distancia_d,2))
+            {
+                motores.Update(TB6612::RIGHT);
+                Leds_update(LED::OFF, LED::OFF, LED::ON, LED::OFF);
+            }
+        }
     }
-
-
 
 }
 
