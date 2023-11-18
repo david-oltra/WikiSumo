@@ -144,6 +144,7 @@ bool CheckSensorLinea(QRE1113 sensor_linea)
     return gpio_get_level(sensor_linea.PinNum());
 }
 
+int8_t STATUS_TOF = 0;
 int8_t start = 0;
 int8_t selected_start_mode;
 void coreAThread(void *arg)
@@ -208,7 +209,7 @@ void coreAThread(void *arg)
             vTaskDelay(pdMS_TO_TICKS(250));
         break;
         case 3:                             //BACK
-            motores.Update(TB6612::BACK);    
+            motores.Update(TB6612::RIGHT);    
             vTaskDelay(pdMS_TO_TICKS(500));
         break;
         default:
@@ -217,20 +218,27 @@ void coreAThread(void *arg)
 
     while (true)
     {
-        ESP_LOGI(TAG,"CORE_A: SEARCHING");
-        motores.Update(TB6612::FWD); 
+    //    ESP_LOGI(TAG,"CORE_A: SEARCHING");
+        if (!STATUS_TOF) 
+        {
+            motores.Update(TB6612::FWD);
+            Leds_update(LED::OFF, LED::OFF, LED::OFF, LED::OFF);
+        } 
         if (CheckSensorLinea(sensor_linea_i))
         {
             motores.Update(TB6612::RIGHT);
+            Leds_update(LED::OFF, LED::OFF, LED::ON, LED::OFF);
             vTaskDelay(pdMS_TO_TICKS(tiempo_de_giro));
         }
         else if (CheckSensorLinea(sensor_linea_d))
         {
             motores.Update(TB6612::LEFT);
+            Leds_update(LED::ON, LED::OFF, LED::OFF, LED::OFF);
             vTaskDelay(pdMS_TO_TICKS(tiempo_de_giro));
         }
     }
 }
+
 
 void coreBThread(void *arg)
 {
@@ -241,19 +249,26 @@ void coreBThread(void *arg)
         {
             if (CheckSensorTOF(sensor_distancia_c,1))
             {
+                STATUS_TOF = 1;
                 motores.Update(TB6612::FWD);
                 Leds_update(LED::OFF, LED::ON, LED::OFF, LED::OFF);
             }
             else if (CheckSensorTOF(sensor_distancia_i,0))
             {
+                STATUS_TOF = 1;
                 motores.Update(TB6612::LEFT);
                 Leds_update(LED::ON, LED::OFF, LED::OFF, LED::OFF);
             }
             else if (CheckSensorTOF(sensor_distancia_d,2))
             {
+                STATUS_TOF = 1;
                 motores.Update(TB6612::RIGHT);
                 Leds_update(LED::OFF, LED::OFF, LED::ON, LED::OFF);
             }
+            else{
+                STATUS_TOF = 0;
+            }
+
         }
     }
 

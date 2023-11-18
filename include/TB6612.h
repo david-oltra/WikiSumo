@@ -20,7 +20,7 @@ class TB6612
 
         void Init();
 
-        void Update(DIRECTION dir);
+        void Update(enum DIRECTION dir);
         /*
         1 1 1 1 -> STOP
         0 1 0 1 -> FWD

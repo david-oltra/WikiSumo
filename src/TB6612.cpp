@@ -29,31 +29,31 @@ void TB6612::Init()
     gpio_set_level(MOTOR_B_PWM, 1);
 }
 
-void TB6612::Update(DIRECTION dir)
+void TB6612::Update(enum DIRECTION dir)
 {
     switch(dir)
     {
-        case DIRECTION::STOP:
+        case TB6612::STOP:
             gpio_set_level(MOTOR_A_1,1);
-            gpio_set_level(MOTOR_A_1,1);
+            gpio_set_level(MOTOR_A_2,1);
             gpio_set_level(MOTOR_B_1,1);
             gpio_set_level(MOTOR_B_2,1);
             break;
-        case DIRECTION::FWD:
+        case TB6612::FWD:
             gpio_set_level(MOTOR_A_1,0);
-            gpio_set_level(MOTOR_A_1,1);
+            gpio_set_level(MOTOR_A_2,1);
             gpio_set_level(MOTOR_B_1,0);
             gpio_set_level(MOTOR_B_2,1);
             break;
-        case DIRECTION::LEFT:
+        case TB6612::LEFT:
             gpio_set_level(MOTOR_A_1,1);
-            gpio_set_level(MOTOR_A_1,0);
+            gpio_set_level(MOTOR_A_2,0);
             gpio_set_level(MOTOR_B_1,0);
             gpio_set_level(MOTOR_B_2,1);
             break;
-        case DIRECTION::RIGHT:
+        case TB6612::RIGHT:
             gpio_set_level(MOTOR_A_1,0);
-            gpio_set_level(MOTOR_A_1,1);
+            gpio_set_level(MOTOR_A_2,1);
             gpio_set_level(MOTOR_B_1,1);
             gpio_set_level(MOTOR_B_2,0);
             break;
