@@ -6,3 +6,5 @@
 include/dVL53L0X.h
 dVL53L0X.cpp
 include/Api
+include/rotary.h
+src/rotary.cpp
