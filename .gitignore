@@ -8,3 +8,4 @@ dVL53L0X.cpp
 include/Api
 include/rotary.h
 src/rotary.cpp
+include/secret.h

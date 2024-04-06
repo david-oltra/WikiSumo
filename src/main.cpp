@@ -1,13 +1,31 @@
+#include <version.h>
 #include <driver/gpio.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/timers.h>
+#include <nvs_flash.h>
 #include <esp_log.h>
 #include <esp_timer.h>
+#include <esp_http_client.h>
+#include <esp_wifi.h>
+#include <esp_https_ota.h>
 #include <pinout.h>
 #include <led.h>
 #include <TB6612.h>
 #include <QRE1113.h>
 #include <VL53L0X.h>
+
+#include "secret.h"
+
+#define ENABLE_OTA
+#ifdef ENABLE_OTA
+extern "C" void wifi_init_sta();
+#endif
+#ifndef WIFI_PWD
+#error Missing WIFI_PWD Environment variable
+#endif
+#ifndef WIFI_SSID
+#error Missing WIFI_SSID Environment variable
+#endif
 
 
 #define I2C_PORT I2C_NUM_0
@@ -30,9 +48,24 @@ int16_t tiempo_de_giro = 500;
 static TaskHandle_t core_A = NULL;
 static TaskHandle_t core_B = NULL;
 
+void EnableWifi()
+{
+#ifdef ENABLE_OTA
+    wifi_init_sta();
+#endif
+}
+
 void Init()
 {
     ESP_LOGI(TAG,"INIT");
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND)
+    {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(err);
+    EnableWifi();
     ESP_LOGI(TAG,"LEDS");
     led_left.Init(); 
     vTaskDelay(pdMS_TO_TICKS(50));
@@ -49,6 +82,64 @@ void Init()
     ESP_LOGI(TAG,"START_MODE");
     ESP_LOGI(TAG,"VL53L0X");
 
+}
+
+
+void updateOTA()
+{
+    char newVersionFW[50];
+    memset(newVersionFW, 0, 50);
+
+    esp_http_client_config_t configFW = {
+        .url = "http://192.168.0.16:8000/VERSION.html",
+        .user_data = newVersionFW,        // Pass address of local buffer to get response
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&configFW);
+    esp_http_client_open(client,0);
+    esp_http_client_fetch_headers(client);
+    esp_http_client_read(client, newVersionFW, esp_http_client_get_content_length(client));
+
+    ESP_LOGE(TAG,"Received html: %s", newVersionFW);
+    float value =  2.2f; 
+    value = atof(newVersionFW);
+    ESP_LOGE(TAG,"Received html: %f", value);
+
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+
+   
+
+    if (value > actualVersion)
+    {
+        ESP_LOGE(TAG, "NEW VERSION!!!");
+    
+        ESP_LOGI(TAG, "Starting OTA task");
+        esp_http_client_config_t config = {
+            .url = "http://192.168.0.16:8000/firmware.bin?",
+            .keep_alive_enable = true,
+        };
+
+        esp_https_ota_config_t ota_config = {
+            .http_config = &config,
+        };
+        ESP_LOGI(TAG, "Attempting to download update from %s", config.url);
+        esp_err_t ret = esp_https_ota(&ota_config);
+        if (ret == ESP_OK)
+        {
+            ESP_LOGI(TAG, "OTA Succeed, Rebooting...");
+            esp_restart();
+        }
+        else
+        {
+            ESP_LOGE(TAG, "Firmware upgrade failed");
+        }
+    }
+/*
+    while (1)
+    {
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+    }
+*/
 }
 
 void Leds_update(LED::STATUS lft, LED::STATUS frnt, LED::STATUS rght, LED::STATUS bck)
@@ -153,8 +244,9 @@ bool CheckSensorLinea(QRE1113 sensor_linea)
     return gpio_get_level(sensor_linea.PinNum());
 }
 
-int8_t STATUS_TOF = 0;
-int8_t start = 0;
+bool STATUS_TOF = 0;
+bool start = 0;
+bool start_core_b = 0;
 int8_t selected_start_mode = 0;
 int ref_time = 0;
 int key_time = 0;
@@ -217,6 +309,7 @@ void coreAThread(void *arg)
         {
             ESP_LOGE(TAG, "START!");
             vTaskDelay(pdMS_TO_TICKS(tiempo_espera_inicio));    //5seg
+            start_core_b = 1;
             ESP_LOGE(TAG, "GO!");
             switch(selected_start_mode)
             {  
@@ -245,7 +338,7 @@ void coreAThread(void *arg)
                 {
                     motores.Update(TB6612::FWD);
                     Leds_update(LED::OFF, LED::OFF, LED::OFF, LED::OFF);
-                } 
+                }
                 if (CheckSensorLinea(sensor_linea_i))
                 {
                     motores.Update(TB6612::RIGHT);
@@ -269,7 +362,7 @@ void coreBThread(void *arg)
     ESP_LOGE(TAG, "Iniciando CORE B");    
     while(1)
     {
-        while(start)
+        while(start_core_b)
         {
             if (CheckSensorTOF(sensor_distancia_c,1))
             {
@@ -298,15 +391,21 @@ void coreBThread(void *arg)
 
 }
 
-
 void app_main()
 {   
     ESP_LOGE(TAG, "Iniciando software");
     Init();
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    vTaskDelay(pdMS_TO_TICKS(5000));
+        if (esp_wifi_connect() == ESP_OK)
+    {
+        ESP_LOGW(TAG, "WIFI CONNECTED");
+        updateOTA();
+    }
+    vTaskDelay(pdMS_TO_TICKS(500));
     Init_VL53L0X();
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    vTaskDelay(pdMS_TO_TICKS(500));
     Init_Key();
+
 
     xTaskCreatePinnedToCore(coreBThread, "core_B", 4096, NULL, 9, &core_B, 1);    
     xTaskCreatePinnedToCore(coreAThread, "core_A", 4096, NULL, 10, &core_A, 0);
