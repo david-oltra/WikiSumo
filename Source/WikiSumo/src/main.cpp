@@ -17,16 +17,16 @@
 #include <espnow.h>
 
 #include "secret.h"
-
-#define ENABLE_OTA
-#ifdef ENABLE_OTA
-extern "C" void wifi_init_sta();
+#ifndef WIFI_SSID
+    #define WIFI_SSID "********"
 #endif
 #ifndef WIFI_PWD  
     #define WIFI_PWD "********"
 #endif
-#ifndef WIFI_SSID
-    #define WIFI_SSID "********"
+
+#define ENABLE_OTA
+#ifdef ENABLE_OTA
+extern "C" void wifi_init_sta();
 #endif
 
 
@@ -92,7 +92,11 @@ esp_err_t updateOTA(void)
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
 
-   
+    if (value == 0)
+    {
+        ESP_ERROR_CHECK(esp_wifi_disconnect());
+        return ESP_ERR_INVALID_VERSION;
+    }
 
     if (value > actualVersion)
     {
@@ -216,13 +220,14 @@ extern "C" bool CheckSensorTOF(VL53L0X sensor, uint i)
     }
 }
 
-
+uint16_t adc_sensor_i_ref = 4095;
+uint16_t adc_sensor_d_ref = 4095;
 bool STATUS_TOF = 0;
 bool start = 0;
 bool start_core_b = 0;
 int8_t selected_start_mode = 0;
-int ref_time = 0;
-int key_time = 0;
+int64_t ref_time = 0;
+int64_t key_time = 0;
 bool key_status = 0;
 bool key_push = 0;
 void coreAThread(void *arg)
@@ -231,6 +236,7 @@ void coreAThread(void *arg)
     
     while(1)
     {
+        ESP_ERROR_CHECK(esp_wifi_disconnect());
         key_status = gpio_get_level(PIN_KEY) | !remote_data.sw;
 
         while(key_status)
@@ -305,7 +311,7 @@ void coreAThread(void *arg)
                 break;
             }
 
-            while(remote_data.sw)
+            while(remote_data.sw && !gpio_get_level(PIN_KEY))
             {
                 if (!STATUS_TOF)
                 {
@@ -314,14 +320,14 @@ void coreAThread(void *arg)
                 }
                 uint16_t adc_sensor_i = adc1_get_raw(ADC1_CHANNEL_0); //85
                 uint16_t adc_sensor_d = adc1_get_raw(ADC1_CHANNEL_3); //1800
-                printf("SensorI: %u \t SensorD: %u\n", adc_sensor_i, adc_sensor_d);
-                if (adc_sensor_i < 75)
+                // printf("SensorI: %u \t SensorD: %u\n", adc_sensor_i, adc_sensor_d);
+                if (adc_sensor_i < adc_sensor_i_ref)
                 {
                     motores.Update(TB6612::LEFT);
                     Leds_update(LED::OFF, LED::OFF, LED::ON, LED::OFF);
                     vTaskDelay(pdMS_TO_TICKS(tiempo_de_giro));
                 }
-                if (adc_sensor_d < 1800)
+                if (adc_sensor_d < adc_sensor_d_ref)
                 {
                     motores.Update(TB6612::RIGHT);
                     Leds_update(LED::ON, LED::OFF, LED::OFF, LED::OFF);
@@ -387,28 +393,35 @@ void app_main()
     if (esp_wifi_connect() == ESP_OK)
     {
         ESP_LOGW(TAG, "WIFI CONNECTED");
-        ESP_LOGW(TAG, "OTA CHECK OK");
-        while(updateOTA() != ESP_OK);
-        ESP_LOGW(TAG, "OTA CHECK OK");
+        ESP_LOGW(TAG, "OTA CHECK");
+        if (updateOTA() == ESP_ERR_INVALID_VERSION) {ESP_LOGE(TAG,"OTA CHECK FAIL");}
+        else {ESP_LOGW(TAG, "OTA CHECK OK");}
         ESP_LOGW(TAG, "WIFI DISCONNECT");
         ESP_ERROR_CHECK(esp_wifi_disconnect());
-        ESP_ERROR_CHECK(esp_wifi_stop());
+        while(esp_wifi_stop() != ESP_OK);
         ESP_LOGW(TAG, "WIFI DISCONNECTED");
-   
     }
     else
     {
-        ESP_LOGW(TAG, "WIFI NOT CONNECTED");
+        ESP_LOGE(TAG, "WIFI NOT CONNECTED");
     }
     ESP_LOGW(TAG, "ESP_NOW INIT");
     ESP_ERROR_CHECK(init_esp_now());
     ESP_ERROR_CHECK(esp_wifi_disconnect());
-    ESP_LOGW(TAG, "ESP_NOW INIT OK");
+    ref_time = esp_timer_get_time();
+    while(!remote_data.sw)
+    {
+        ESP_LOGI(TAG, "Waiting signal");
+        if (esp_timer_get_time() - ref_time > 30000) {break;} 
+    }
+    if (remote_data.sw) {ESP_LOGW(TAG, "ESP_NOW INIT OK");}
+    else {ESP_LOGE(TAG, "ESP_NOW INIT FAIL");}
     ESP_LOGW(TAG,"LEDS INIT");
     led_left.Init(); 
     led_front.Init(); 
     led_right.Init(); 
     led_back.Init();
+    Leds_update(LED::OFF, LED::OFF, LED::OFF, LED::OFF);
     ESP_LOGW(TAG,"LEDS INIT OK");
     ESP_LOGW(TAG,"TB6612 INIT");
     motores.Init();
@@ -417,13 +430,32 @@ void app_main()
     adc1_config_width(ADC_WIDTH_BIT_12);
     adc1_config_channel_atten(ADC1_CHANNEL_0,ADC_ATTEN_DB_11);
     ESP_LOGI(TAG,"ADC_WIDTH_BIT_12|\tADC1_CHANNEL_0,ADC_ATTEN_DB_11");
+    adc_sensor_i_ref = adc1_get_raw(ADC1_CHANNEL_0);
+    adc_sensor_d_ref = adc1_get_raw(ADC1_CHANNEL_3);
+    for (uint8_t i=0; i<50; i++)
+    {
+        uint16_t adc_I = adc1_get_raw(ADC1_CHANNEL_0);
+        uint16_t adc_D = adc1_get_raw(ADC1_CHANNEL_3);
+        if (adc_I < adc_sensor_i_ref){adc_sensor_i_ref = adc_I;}
+        if (adc_D < adc_sensor_d_ref){adc_sensor_d_ref = adc_D;}
+        // printf("I = %u\tD = %u\tImin = %u\t Dmin = %u\n",adc_I,adc_D,adc_sensor_i_ref,adc_sensor_d_ref);
+        vTaskDelay(pdMS_TO_TICKS(100));
+        if (i%4==0) {Leds_update(LED::ON, LED::OFF, LED::OFF, LED::OFF);}
+        else if (i%3==0) {Leds_update(LED::OFF, LED::ON, LED::OFF, LED::OFF);}
+        else if (i%2==0) {Leds_update(LED::OFF, LED::OFF, LED::ON, LED::OFF);}
+        else {Leds_update(LED::OFF, LED::OFF, LED::OFF, LED::ON);}
+    }
+    adc_sensor_i_ref -= 10;
+    adc_sensor_d_ref -= 10;
     ESP_LOGW(TAG,"QRE1113 INIT OK");
     ESP_LOGW(TAG,"VL53L0X INIT");
     while(Init_VL53L0X() != ESP_OK);
     ESP_LOGW(TAG,"VL53L0X INIT OK");
-    ESP_LOGW(TAG,"VL53L0X INIT");
+    ESP_LOGW(TAG,"KEY INIT");
     while(Init_Key() != ESP_OK);
-    ESP_LOGW(TAG,"VL53L0X INIT OK");
+    ESP_LOGW(TAG,"KEY INIT OK");
+    Leds_update(LED::ON, LED::OFF, LED::OFF, LED::OFF);
+    
 
     xTaskCreatePinnedToCore(coreBThread, "core_B", 4096, NULL, 9, &core_B, 1);    
     xTaskCreatePinnedToCore(coreAThread, "core_A", 4096, NULL, 10, &core_A, 0);
